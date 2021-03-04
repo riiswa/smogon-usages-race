@@ -6,7 +6,7 @@ script:
 deploy:
   provider: pages
   skip_cleanup: true
-  github_token: 5f47d4f8cd19847e6450709d4296652d3e68b4fd
+  github_token: $GH_TOKEN
   keep_history: true
   on:
     branch: main
