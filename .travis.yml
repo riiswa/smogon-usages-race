@@ -1,0 +1,12 @@
+language: scala
+scala:
+  - 2.13.5
+script:
+  - bash build.sh # generate static files
+deploy:
+  provider: pages
+  skip_cleanup: true
+  github_token: 5f47d4f8cd19847e6450709d4296652d3e68b4fd
+  keep_history: true
+  on:
+    branch: main
