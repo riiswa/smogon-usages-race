@@ -1,6 +1,9 @@
 language: scala
 scala:
   - 2.13.5
+branches:
+  only:
+    - main
 script:
   - bash build.sh # generate static files
 deploy:
@@ -10,3 +13,4 @@ deploy:
   keep_history: true
   on:
     branch: main
+  local_dir: public
