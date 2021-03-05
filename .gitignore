@@ -22,3 +22,4 @@ project/plugins/project/
 *.json
 *.gif
 *.png
+public/sprites/

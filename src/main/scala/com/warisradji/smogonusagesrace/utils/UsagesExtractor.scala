@@ -1,39 +1,65 @@
 package com.warisradji.smogonusagesrace.utils
 
+import zio.{IO, Task}
+
 import java.io.{BufferedWriter, File, FileWriter}
-import scala.io.Source
+import scala.collection.parallel.CollectionConverters._
+import scala.collection.parallel.immutable.ParSeq
+import java.net.URL
+import sys.process._
 
-object UsagesExtractor {
-  val smogonStatsUrl = "https://www.smogon.com/stats/"
 
-  def getFolders: List[String] = Source.fromURL(smogonStatsUrl).getLines().collect {
-    case line if line.contains("href") =>
-      """"((?:[^"\\]|\\[\\"ntbrf])+)"""".r.findFirstMatchIn(line).map(_.toString.drop(1).dropRight(1))
-  }.toList.flatten.tail
+case class UsagesExtractor(outputFile: String, filters: List[String => Boolean], limit: Int = 50) {
+  private val smogonStatsUrl = "https://www.smogon.com/stats/"
 
-  def getUsagesDataFiles(folders: List[String])(filters: List[String => Boolean]): List[(String, String)] = folders.map {
-    date =>
-      date -> Source.fromURL(smogonStatsUrl + date).getLines().collect {
-        case line if line.contains(".txt") =>
-          """"((?:[^"\\]|\\[\\"ntbrf])+)"""".r.findFirstMatchIn(line).map(_.toString.drop(1).dropRight(1))
-      }.toList.flatten.find(s => filters.forall(_ (s))).getOrElse("")
-  }
+  private val readUrl = (url: String) => new URL(url).cat.lazyLines
 
-  def parseData(url: String, date: String, limit: Int = 50): List[UsageData] =
-    Source.fromURL(url).getLines().toList.slice(5, limit + 5).map(l => {
+  private def getSourceFromUrl: Task[ParSeq[String]] =
+    IO.effect(readUrl(smogonStatsUrl).par)
+
+  private def getFoldersFromSource(source: ParSeq[String]): Task[ParSeq[String]] =
+    IO.effect(source.collect {
+      case line if line.contains("href") =>
+        """"((?:[^"\\]|\\[\\"ntbrf])+)"""".r.findFirstMatchIn(line).map(_.toString.drop(1).dropRight(1))
+    }.flatten.tail)
+
+  private def getFilesFromFolders(folders: ParSeq[String]): Task[ParSeq[(String, String)]] =
+    IO.effect(folders.map {
+      date =>
+        date -> readUrl(smogonStatsUrl + date).collect {
+          case line if line.contains(".txt") =>
+            """"((?:[^"\\]|\\[\\"ntbrf])+)"""".r.findFirstMatchIn(line).map(_.toString.drop(1).dropRight(1))
+        }.toList.flatten.find(s => filters.forall(_ (s))).getOrElse("")
+    })
+
+  private def parseData(url: String, date: String, limit: Int = 50): List[UsageData] =
+    readUrl(url).toList.slice(5, limit + 5).map(l => {
       val data = l.split('|')
       UsageData(date, data(2).trim, data(4).trim.toInt)
     })
 
+  private def getUsagesFromFiles(files: ParSeq[(String, String)]): Task[ParSeq[UsageData]] = IO.effect(
+    files.flatMap {
+      case (date, fileName) => parseData(smogonStatsUrl + date + fileName, date.init, limit)
+    })
 
-  def getUsagesData(usagesDataFiles: List[(String, String)], limit: Int = 50): List[UsageData] = usagesDataFiles.flatMap {
-    case (date, fileName) => parseData(smogonStatsUrl + date + fileName, date.init, limit)
-  }
+  private def write(usages: ParSeq[UsageData]): Task[Unit] = IO.effect(new BufferedWriter(new FileWriter(
+    new File(outputFile))) {
+      write(usages.map(_.serialize).mkString("[", ",", "]"))
+    }.close())
 
-  def write(fileName: String, ud: List[UsageData]): Unit = {
-    val file = new File(fileName)
-    val bw = new BufferedWriter(new FileWriter(file))
-    bw.write(ud.map(_.serialize).mkString("[", ",", "]"))
-    bw.close()
-  }
+  def extract: Task[Unit] = for {
+    source <- getSourceFromUrl
+    folders <- getFoldersFromSource(source)
+    files <- getFilesFromFolders(folders)
+    usages <- getUsagesFromFiles(files)
+    w <- write(usages)
+  } yield w
+}
+
+object X extends App {
+  //def run(args: List[String]) =
+  //  UsagesExtractor("x.json", List(x => x.contains("1825"), x => !x.contains("double"))).extract.exitCode
+
+  println(new URL("https://www.smogon.com/stats/").cat.lazyLines)
 }
